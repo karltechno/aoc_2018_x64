@@ -65,8 +65,8 @@ start:
 
 .eval_counters_begin:
     mov eax, 0
-    mov r8, 0 ; has two
-    mov r9, 0 ; has three
+    mov r8, 0 ; has two (0 or 1)
+    mov r9, 0 ; has three (0 or 1)
     mov r10, 1 ; store one for cmov
 
 .eval_counter_loop_start:
@@ -81,8 +81,7 @@ start:
     cmp eax, c_num_char_array_size
     je .eval_counter_end
     test r8, r9
-    jnz .eval_counter_end
-    jmp .eval_counter_loop_start
+    jz .eval_counter_loop_start
 
 .eval_counter_end:
     add [exactly_two], r8
