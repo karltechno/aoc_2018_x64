@@ -1,0 +1,1 @@
+fasm.exe day_2.asm
