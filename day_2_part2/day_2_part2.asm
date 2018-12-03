@@ -20,12 +20,16 @@ g_strings rd c_max_lines * c_max_line_len
 section '.text' code readable executable
 
 start:
-    virtual at rbp + 8
+    push rbp
+    push r14
+    push r15
+    mov rbp, rsp
+    add rbp, 32
+    virtual at rbp
         total_lines dq ?
     end virtual
 
-    mov rbp, rsp
-    sub rsp, 8 + 32
+    sub rsp, 32
     mov rcx, _filename
     mov rdx, _fopen_mode
     call [fopen]
@@ -113,7 +117,11 @@ start:
     call [fclose]
 
 .ret_main:
-    add rsp, 8 + 32
+    add rsp, 32
+    pop r15
+    pop r14
+    pop rbp
+
     xor eax, eax
     ret
 

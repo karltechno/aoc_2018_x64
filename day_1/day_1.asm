@@ -16,12 +16,14 @@ g_file_handle dq 0
 section '.text' code readable executable
 
 start:
-    virtual at rbp + 8
+    push rbp
+    mov rbp, rsp
+
+    virtual at rbp + 16
         freq_update dq ?
     end virtual
 
-    mov rbp, rsp
-    sub rsp, 48h
+    sub rsp, 40h
     mov rcx, _filename
     mov rdx, _fopen_mode
     call [fopen]
@@ -50,10 +52,13 @@ start:
     mov rcx, [g_file_handle]
     test rcx, rcx
     jz .ret_main
+    sub rsp, 20h
     call [fclose]
+    add rsp, 20h
 
 .ret_main:
-    add rsp, 48h
+    add rsp, 40h
+    pop rbp
     xor eax, eax
     ret
 

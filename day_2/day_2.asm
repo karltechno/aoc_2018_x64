@@ -21,13 +21,15 @@ g_read_buffer rb c_sizeof_read_buffer
 section '.text' code readable executable
 
 start:
-    virtual at rbp + 8
+    push rbp
+    mov rbp, rsp
+
+    virtual at rbp + 16
         exactly_two dq ?
         exactly_three dq ?
     end virtual
 
-    mov rbp, rsp
-    sub rsp, 8 + 32
+    sub rsp, 32
     mov rcx, _filename
     mov rdx, _fopen_mode
     call [fopen]
@@ -103,7 +105,8 @@ start:
     call [fclose]
 
 .ret_main:
-    add rsp, 8 + 32
+    add rsp, 32
+    pop rbp
     xor eax, eax
     ret
 
