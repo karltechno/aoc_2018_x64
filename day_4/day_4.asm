@@ -6,7 +6,7 @@ include 'win64a.inc'
 section '.data' data readable writeable
 
 c_max_guards = 512
-c_max_entries_per_guard = 512
+c_max_entries_per_guard = 1024
 c_input_buff_size = 256
 
 ; For each guard, we read in guard data and append packed integer keys for their times. Then we sort and can calculate sleeping schedules.
@@ -62,7 +62,7 @@ macro pack_day day, bitfield {
     or bitfield, day
 }
 
-align 8
+align 4
 struct GuardData
     num_entries dd ?
     entry_keys rd c_max_entries_per_guard
@@ -141,8 +141,9 @@ read_next_line_into_buffer: ; tail call
 
 
 parse_time_and_guard_shift: ; if this string is a shift, add that shift and return 1. If it is anything else then return 0 (but we have parsed the time)
-.c_stack_size = 32 + 8 * 4
+.c_stack_size = 32 + 8 * 5
     push rbp
+
     sub rsp, .c_stack_size
     mov rbp, rsp
     add rbp, 32
@@ -173,41 +174,44 @@ parse_time_and_guard_shift: ; if this string is a shift, add that shift and retu
     mov [g_lastParsedData + ParsedData.hour], 0
 
 .after_hour_fixup:
+    xor r9d, r9d
+    pack_hour [g_lastParsedData + ParsedData.hour], r9d
+    pack_minute [g_lastParsedData + ParsedData.minute], r9d
+    pack_day [g_lastParsedData + ParsedData.day], r9d
+    pack_month [g_lastParsedData + ParsedData.month], r9d
+    mov [g_lastParsedData + ParsedData.packed_time], r9d
+
+    mov r8, 0
     cmp rax, 5 ; = number of params for a shift
-    jz .matched_new_shift
-    xor rax, rax
+    cmovnz rax, r8
     add rsp, .c_stack_size
     pop rbp
     ret
 
-    .matched_new_shift:
-        xor r9d, r9d
-        pack_hour [g_lastParsedData + ParsedData.hour], r9d
-        pack_minute [g_lastParsedData + ParsedData.minute], r9d
-        pack_day [g_lastParsedData + ParsedData.minute], r9d
-        pack_month [g_lastParsedData + ParsedData.minute], r9d
-        mov [g_lastParsedData + ParsedData.packed_time], r9d
 
-        mov ecx, [g_lastParsedData + ParsedData.guard_id]
-        call find_or_allocate_guard_idx
-        ; rax has guard index, load the guard data
-        mov rcx, sizeof.GuardData
-        mul ecx
-        lea rax, [g_guardData + eax] ; rax has guard data ptr
-        mov ecx, [rax + GuardData.num_entries] ; rcx = num entries in guard data
-        add dword [rax + GuardData.num_entries], 1
-        lea rdx, [GuardData.entry_keys + rcx * 4]
-        add rdx, g_guardData ;
-        mov dword [rdx], r9d
-
-        add rsp, .c_stack_size
-        pop rbp
-        mov rax, 1
-        ret
+add_time_to_guard_data: ; rcx = guard idx, ; rdx = time
+    mov r9, rdx
+    mov rax, rcx
+    mov ecx, sizeof.GuardData
+    mul ecx
+    lea r8, [g_guardData + eax] ; r8 has guard data ptr
+    mov ecx, [r8 + GuardData.num_entries] ; rcx = num entries in guard data
+    add dword [r8 + GuardData.num_entries], 1
+    lea rdx, [rcx * 4 + GuardData.entry_keys]
+    add rdx, g_guardData ;
+    mov dword [rdx], r9d
+    ret
 
 start:
 .c_stack_size = 32
     push rbp
+    push rdi
+    push rsi
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
     mov rbp, rsp
     sub rsp, .c_stack_size
 
@@ -252,13 +256,74 @@ start:
     test rax, rax ; 1 = a new shift, we don't care about that here
     jnz .read_next_sleep_time
     ; now we have to find which guard this time is connected to. We find the shortest time greater than this time.
-    mov ecx, [g_lastParsedData + ParsedData.packed_time]
-    ; TODO -> NEXT! 
-    start_from_here_next
+    mov ecx, [g_lastParsedData + ParsedData.packed_time] ; ecx our packed time
+    mov eax, [g_numShiftBeginTimes]
+    mov rdx, g_shiftBeginArray ; rdx = current shift array ptr
+    lea rax, [g_shiftBeginArray + rax * sizeof.ShiftBeginData] ; rax = shift array end
+    xor r8d, r8d ; r8 = best guard id
+    mov r9d, 0xFFFFFFFF ; r9 = shortest time
 
+macro test_all_shift_loop_incr_loop {
+    add rdx, sizeof.ShiftBeginData
+    jmp .test_all_shift_times_loop
+}
+
+.test_all_shift_times_loop:
+    cmp rax, rdx
+    jz .finalize_sleep_guard_idx
+    mov r10d, [rdx + ShiftBeginData.packed_time]
+    mov r11d, r10d
+    mov r12d, ecx
+    sub r12d, r10d ; r12 = packed time copy 
+    ja .check_best_sleep_time
+    test_all_shift_loop_incr_loop
+
+.check_best_sleep_time:
+    cmp r9d, r12d
+    ja .update_best_time
+    test_all_shift_loop_incr_loop
+
+.update_best_time:
+    mov r8d, [rdx + ShiftBeginData.guard_id]
+    mov r9d, r10d
+    test_all_shift_loop_incr_loop
+
+.finalize_sleep_guard_idx:
+    cmp r9d, 0xFFFFFFFF
+    jnz @f
+    ud2 ; programmer error / bad data (could not find a shift/guard for this sleep time)
+@@: mov ecx, r8d
+    call find_or_allocate_guard_idx
+    mov rcx, rax
+    mov edx, [g_lastParsedData + ParsedData.packed_time]
+    call add_time_to_guard_data
+    jmp .read_next_sleep_time 
 
 .calculate_best_guard_time:
-; todo
+    ; loop over each guard
+    mov eax, [g_numGuards]
+    mov r8, sizeof.GuardData ; r8 = size
+    mul r8 ; rax = end ptr
+    add rax, g_guardData
+    mov rcx, g_guardData ; rcx = current ptr
+
+    xor r14, r14 ; r14 = best guard _index_
+    xor r15, r15 ; current highest minutes
+
+@@:
+    cmp rax, rcx
+    jz .end
+    mov r9d, [rcx + GuardData.num_entries]
+    mov r10, r9
+    and r9, 1
+    jnz .error
+    add rcx, r8
+    jmp @r
+    TODO_!!
+
+
+.error:
+    ud2
 
 .end:
     mov rcx, _printf_message_fmt
@@ -272,6 +337,14 @@ start:
 
 .ret_main:
     add rsp, .c_stack_size
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rsi
+    pop rdi
     pop rbp
     xor eax, eax
     ret
