@@ -107,6 +107,44 @@ g_file_handle dq 0
 
 section '.text' code readable executable
 
+insertion_sort_u32: ; rcx = pointer, rdx = num
+    xor rax, rax
+    push rbx
+    push rdi
+
+.outer:
+    add rax, 1
+	cmp rdx, rax 
+	jle .finish
+	mov r8, rax
+
+.inner:
+	mov ebx, dword [rcx + r8 * 4]
+
+	mov r10, r8
+	sub r10, 1
+
+	mov edi, dword [rcx + r10 * 4]
+
+	cmp ebx, edi
+	ja .outer
+
+	; swap
+	mov dword [rcx + r8 * 4], edi
+	mov dword [rcx + r10 * 4], ebx
+	
+    sub r8, 1
+	test r8, r8
+	jz .outer
+	jmp .inner
+
+.finish:
+	pop rdi
+	pop rbx
+	ret
+
+
+
 find_or_allocate_guard_idx:
     ; rcx = guard id 
     mov edx, [g_numGuards]
@@ -302,24 +340,28 @@ macro test_all_shift_loop_incr_loop {
 .calculate_best_guard_time:
     ; loop over each guard
     mov eax, [g_numGuards]
-    mov r8, sizeof.GuardData ; r8 = size
-    mul r8 ; rax = end ptr
+    mov r13, sizeof.GuardData ; r13 = size
+    mul r13 
     add rax, g_guardData
-    mov rcx, g_guardData ; rcx = current ptr
+    mov r12, rax ; r12 = end ptr
+    mov rdi, g_guardData ; rdi = current ptr
 
     xor r14, r14 ; r14 = best guard _index_
     xor r15, r15 ; current highest minutes
 
 @@:
-    cmp rax, rcx
+    cmp r12, rdi
     jz .end
-    mov r9d, [rcx + GuardData.num_entries]
-    mov r10, r9
-    and r9, 1
-    jnz .error
-    add rcx, r8
+    mov edx, [rdi + GuardData.num_entries]
+    lea rcx, [rdi + GuardData.entry_keys]
+    call insertion_sort_u32
+    ; now keys are sorted, we can calculate the total time. All 
+    mov edx, [rdi + GuardData.num_entries]
+    lea rcx, [rdi + GuardData.entry_keys]
+    _TODO_HERE_
+
+    add rdi, r13
     jmp @r
-    TODO_!!
 
 
 .error:
