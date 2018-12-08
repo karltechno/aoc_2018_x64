@@ -214,10 +214,8 @@ parse_time_and_guard_shift: ; if this string is a shift, add that shift and retu
 
     mov rax, rbp
     mov qword [rax], g_lastParsedData.hour
-    add rax, 8
-    mov qword [rax], g_lastParsedData.minute
-    add rax, 8
-    mov qword [rax], g_lastParsedData.guard_id
+    mov qword [rax + 8], g_lastParsedData.minute
+    mov qword [rax + 16], g_lastParsedData.guard_id
     call [sscanf]
 
     ; we set midnight times to 0 and 11pm (23xx) to 1, so the sort ordering works out.
