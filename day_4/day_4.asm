@@ -64,18 +64,27 @@ macro pack_day day, bitfield {
 
 align 4
 struct GuardData
+    guard_id dd ?
     num_entries dd ?
     entry_keys rd c_max_entries_per_guard
 ends
 
 
-g_guardData rb sizeof.GuardData * c_max_guards
+g_guardData rd (sizeof.GuardData * c_max_guards) / 4
 g_guardIndexTable rd c_max_guards ; the guard id entry in this array indicies its index in the guarddata array
 g_numGuards dd 0
+
+g_minuteAccumArray rd 60
 
 struct ShiftBeginData
     guard_id dd ?
     packed_time dd ?
+ends
+
+struct GuardSleepData
+    guard_id dd ?
+    total_mins_sleep dd ?
+    highest_sleep_min dd ?
 ends
 
 
@@ -101,6 +110,9 @@ ends
 
 g_lastParsedData ParsedData ?
 
+g_bestGuardSleepData GuardSleepData ?
+g_currentGuardSleepData GuardSleepData ?
+
 align 8
 g_file_handle dq 0
 
@@ -114,29 +126,29 @@ insertion_sort_u32: ; rcx = pointer, rdx = num
 
 .outer:
     add rax, 1
-	cmp rdx, rax 
-	jle .finish
-	mov r8, rax
+    cmp rdx, rax 
+    jbe .finish
+    mov r8, rax
 
 .inner:
-	mov ebx, dword [rcx + r8 * 4]
+    mov ebx, dword [rcx + r8 * 4]
 
-	mov r10, r8
-	sub r10, 1
+    mov r10, r8
+    sub r10, 1
 
-	mov edi, dword [rcx + r10 * 4]
+    mov edi, dword [rcx + r10 * 4]
 
-	cmp ebx, edi
-	ja .outer
+    cmp ebx, edi
+    ja .outer
 
 	; swap
-	mov dword [rcx + r8 * 4], edi
-	mov dword [rcx + r10 * 4], ebx
+    mov dword [rcx + r8 * 4], edi
+    mov dword [rcx + r10 * 4], ebx
 	
     sub r8, 1
-	test r8, r8
-	jz .outer
-	jmp .inner
+    test r8, r8
+    jz .outer
+    jmp .inner
 
 .finish:
 	pop rdi
@@ -145,12 +157,14 @@ insertion_sort_u32: ; rcx = pointer, rdx = num
 
 
 
+
+
 find_or_allocate_guard_idx:
     ; rcx = guard id 
     mov edx, [g_numGuards]
     mov rax, g_guardIndexTable ; rax = ptr
     
-    lea r8, [rax + 4 * rdx] ; r8 = end 
+    lea r8, [g_guardIndexTable + 4 * rdx] ; r8 = end 
 @@: cmp rax, r8
     jz .alloc_new
     cmp ecx, dword [rax]
@@ -166,7 +180,14 @@ find_or_allocate_guard_idx:
     .alloc_new:
         mov dword [r8], ecx
         add [g_numGuards], 1
+        
         mov rax, rdx ; rdx has num guards before
+        ; set the guard id in guard data
+        mov r9, sizeof.GuardData
+        mul r9
+        mov [g_guardData + GuardData.guard_id + rax], ecx
+        mov eax, [g_numGuards]
+        sub eax, 1
         ret
 
 
@@ -188,36 +209,33 @@ parse_time_and_guard_shift: ; if this string is a shift, add that shift and retu
 
     mov rcx, g_inputBuff 
     mov rdx, _fscanf_begin_shift_specifier
-    lea r8, [g_lastParsedData + ParsedData.month] 
-    lea r9, [g_lastParsedData + ParsedData.day]
+    lea r8, [g_lastParsedData.month] 
+    lea r9, [g_lastParsedData.day]
 
     mov rax, rbp
-    mov qword [rax], g_lastParsedData
-    add qword [rax], ParsedData.hour
+    mov qword [rax], g_lastParsedData.hour
     add rax, 8
-    mov qword [rax], g_lastParsedData
-    add qword [rax], ParsedData.minute
+    mov qword [rax], g_lastParsedData.minute
     add rax, 8
-    mov qword [rax], g_lastParsedData
-    add qword [rax], ParsedData.guard_id
+    mov qword [rax], g_lastParsedData.guard_id
     call [sscanf]
 
-    ; we set midnight times to 1 and 11pm (23xx) to 0, so the sort ordering works out.
-    cmp [g_lastParsedData + ParsedData.hour], 23
+    ; we set midnight times to 0 and 11pm (23xx) to 1, so the sort ordering works out.
+    cmp [g_lastParsedData.hour], 23
     jz @f
     ; time is 0
-    mov [g_lastParsedData + ParsedData.hour], 1
+    mov [g_lastParsedData.hour], 0
     jmp .after_hour_fixup
 @@:
-    mov [g_lastParsedData + ParsedData.hour], 0
+    mov [g_lastParsedData.hour], 1
 
 .after_hour_fixup:
     xor r9d, r9d
-    pack_hour [g_lastParsedData + ParsedData.hour], r9d
-    pack_minute [g_lastParsedData + ParsedData.minute], r9d
-    pack_day [g_lastParsedData + ParsedData.day], r9d
-    pack_month [g_lastParsedData + ParsedData.month], r9d
-    mov [g_lastParsedData + ParsedData.packed_time], r9d
+    pack_hour [g_lastParsedData.hour], r9d
+    pack_minute [g_lastParsedData.minute], r9d
+    pack_day [g_lastParsedData.day], r9d
+    pack_month [g_lastParsedData.month], r9d
+    mov [g_lastParsedData.packed_time], r9d
 
     mov r8, 0
     cmp rax, 5 ; = number of params for a shift
@@ -236,7 +254,7 @@ add_time_to_guard_data: ; rcx = guard idx, ; rdx = time
     mov ecx, [r8 + GuardData.num_entries] ; rcx = num entries in guard data
     add dword [r8 + GuardData.num_entries], 1
     lea rdx, [rcx * 4 + GuardData.entry_keys]
-    add rdx, g_guardData ;
+    add rdx, r8 ;
     mov dword [rdx], r9d
     ret
 
@@ -299,7 +317,7 @@ start:
     mov rdx, g_shiftBeginArray ; rdx = current shift array ptr
     lea rax, [g_shiftBeginArray + rax * sizeof.ShiftBeginData] ; rax = shift array end
     xor r8d, r8d ; r8 = best guard id
-    mov r9d, 0xFFFFFFFF ; r9 = shortest time
+    mov r9d, 0 ; r9 = shortest time
 
 macro test_all_shift_loop_incr_loop {
     add rdx, sizeof.ShiftBeginData
@@ -317,8 +335,8 @@ macro test_all_shift_loop_incr_loop {
     test_all_shift_loop_incr_loop
 
 .check_best_sleep_time:
-    cmp r9d, r12d
-    ja .update_best_time
+    cmp r9d, r10d
+    jb .update_best_time
     test_all_shift_loop_incr_loop
 
 .update_best_time:
@@ -333,43 +351,98 @@ macro test_all_shift_loop_incr_loop {
 @@: mov ecx, r8d
     call find_or_allocate_guard_idx
     mov rcx, rax
-    mov edx, [g_lastParsedData + ParsedData.packed_time]
+    mov edx, [g_lastParsedData.packed_time]
     call add_time_to_guard_data
     jmp .read_next_sleep_time 
 
 .calculate_best_guard_time:
     ; loop over each guard
     mov eax, [g_numGuards]
-    mov r13, sizeof.GuardData ; r13 = size
-    mul r13 
+    mov r13, sizeof.GuardData 
+    mul r13d
     add rax, g_guardData
     mov r12, rax ; r12 = end ptr
     mov rdi, g_guardData ; rdi = current ptr
 
-    xor r14, r14 ; r14 = best guard _index_
-    xor r15, r15 ; current highest minutes
-
-@@:
+.calc_time_outer:
     cmp r12, rdi
     jz .end
+
+    mov edx, [rdi + GuardData.guard_id]
+    mov [g_currentGuardSleepData.guard_id], edx
+    mov [g_currentGuardSleepData.total_mins_sleep], 0
+    mov [g_currentGuardSleepData.highest_sleep_min], 0
+    mov rcx, g_minuteAccumArray
+    mov rdx, 0
+    mov r8, 4 * 60 
+    call [memset] ; no volatile regs in above loop.
+    
     mov edx, [rdi + GuardData.num_entries]
+    test edx, edx
+    jz .calc_time_outer_loop_next
     lea rcx, [rdi + GuardData.entry_keys]
     call insertion_sort_u32
-    ; now keys are sorted, we can calculate the total time. All 
+    ; now keys are sorted, we can calculate the total time. 
     mov edx, [rdi + GuardData.num_entries]
     lea rcx, [rdi + GuardData.entry_keys]
-    _TODO_HERE_
+    xor r14, r14 ; r14 = inner loop counter
 
-    add rdi, r13
-    jmp @r
+.calc_time_inner:
+    mov r15d, dword [rcx + r14 * 4]
+    add r14d, 1
+    mov r11d, dword [rcx + r14 * 4]
+    add r14d, 1
 
+    and r15d, c_minuteMask
+    mov r10d, r15d ; r10d = first entry copy
+    and r11d, c_minuteMask
+    
+    sub r11d, r15d  ; should
+    add [g_currentGuardSleepData.total_mins_sleep], r11d
+    add r11d, r15d
 
-.error:
-    ud2
+; add times to accum buffer
+@@: add [g_minuteAccumArray + r10d * 4], 1
+    add r10d, 1
+    cmp r10d, r11d
+    jnz @r
+
+    cmp r14d, edx
+    jnz .calc_time_inner
+
+    ; check if this time is better
+    mov r15d, [g_currentGuardSleepData.total_mins_sleep]
+    cmp r15d, [g_bestGuardSleepData.total_mins_sleep]
+    jna .calc_time_outer_loop_next
+    ; this time is better, need to find the best minute
+    mov [g_bestGuardSleepData.total_mins_sleep], r15d
+    mov r15d, [g_currentGuardSleepData.guard_id]
+    mov [g_bestGuardSleepData.guard_id], r15d
+
+    xor r15, r15
+    xor eax, eax ; rax = best min accum
+    xor r14d, r14d
+
+@@: cmp eax, dword [g_minuteAccumArray + r15 * 4]
+    cmovb r14d, r15d
+    cmovb eax, dword [g_minuteAccumArray + r15 * 4]
+    add r15, 1
+    cmp r15, 60
+    jnz @r
+
+    mov [g_bestGuardSleepData.highest_sleep_min], r14d
+    
+.calc_time_outer_loop_next:
+    add rdi, sizeof.GuardData
+    jmp .calc_time_outer
 
 .end:
     mov rcx, _printf_message_fmt
-    mov edx, 0
+    mov eax, [g_bestGuardSleepData.highest_sleep_min]
+    mov edx, [g_bestGuardSleepData.guard_id]
+    mul edx
+    mov edx, eax
+
     call [printf] 
 
     mov rcx, [g_file_handle]
@@ -404,7 +477,8 @@ section '.idata' import data readable writeable
         sscanf,'sscanf',\
         printf,'printf',\
         fgets,'fgets',\
-        fseek,'fseek'\
+        fseek,'fseek',\
+        memset,'memset'\
 
     include 'api\kernel32.inc'
     include 'api\user32.inc'
