@@ -25,8 +25,15 @@ section '.text' code readable executable
 
 start:
 .c_stack_size = 32 + 8
-
     push rbp
+    push rdi
+    push rsi
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    
     sub rsp, .c_stack_size
     mov rbp, rsp
     add rbp, 32
@@ -130,7 +137,16 @@ start:
     
 .ret_main:
     add rsp, .c_stack_size
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rsi
+    pop rdi
     pop rbp
+    
     xor eax, eax
     ret
 
