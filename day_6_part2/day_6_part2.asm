@@ -36,6 +36,8 @@ g_max_x dd 0
 g_min_y dd 0
 g_max_y dd 0
 
+g_num_10k_points dd 0
+
 macro _max dest, src 
 {
     cmp dest, src
@@ -130,6 +132,7 @@ start:
     virtual at rbp  
         .x_idx dd ?
         .y_idx dd ?
+        .10k_accumulator dd ?
     end virtual
 
     mov eax, [g_min_y]
@@ -145,15 +148,14 @@ start:
         mov eax, [g_min_x]
         mov [.x_idx], eax
         cmp [.y_idx], r15d
-        jz .finished_grid_loop
+        jz .end
 
         .loop_x:
         cmp [.x_idx], r14d
         jz .loop_x_end 
 
         xor edi, edi ; loop counter
-        xor rsi, rsi ; best grid entry ptr
-        mov ebx, -1 ; shortest dist
+        mov [.10k_accumulator], 0
 
         .next_grid_entry_test:
             cmp edi, [g_num_grid_entries]
@@ -166,82 +168,26 @@ start:
             mov ecx, [.x_idx]
             mov edx, [.y_idx]
             call man_dist
-            cmp ebx, eax
-            cmova rsi, r10
-            cmova ebx, eax
-            mov [r10 + GridEntry.temp_man_dist], eax
+            add [.10k_accumulator], eax
             add edi, 1
             jmp .next_grid_entry_test
 
         .finish_scan_grid_entries:
-            ; first need to check if any other grid entries have the same best distance - then it is invalid
-            mov r8, g_grid_entries
-            mov eax, sizeof.GridEntry
-            mov ecx, [g_num_grid_entries]
-            mul ecx
-            add rax, r8 ; rax = end ptr
+            cmp [.10k_accumulator], 10000
+            jae @f
+            add [g_num_10k_points], 1
 
-        .check_duplicate_area_loop:
-            cmp r8, rax
-            jz .do_increment_area
-            cmp r8, rsi
-            jz @f
-            cmp dword [r8 + GridEntry.temp_man_dist], ebx
-            jz .no_increment_area
-        @@: add r8, sizeof.GridEntry
-            jmp .check_duplicate_area_loop
-        
-        .do_increment_area:
-            add [rsi + GridEntry.area_size], 1
-        .no_increment_area:    
-        ; check infinite
-            mov eax, [.x_idx]
-            mov r10d, [.y_idx]
-            cmp eax, [g_min_x]
-            jz .make_infinite
-            cmp eax, [g_max_x]
-            jz .make_infinite
-            cmp r10d, [g_min_y]
-            jz .make_infinite
-            cmp r10d, [g_max_y]
-            jz .make_infinite
-
-            add [.x_idx], 1
+        @@: add [.x_idx], 1
             jmp .loop_x
             
-        .make_infinite:
-            add [.x_idx], 1
-            mov dword [rsi + GridEntry.marked_infinite], 1
-            jmp .loop_x
-
         .loop_x_end:
             add [.y_idx], 1
             jmp .loop_y   
 
 
-.finished_grid_loop:
-    ; discount illegal values
-    mov r8, g_grid_entries ; r8 = current grid ptr
-    mov eax, sizeof.GridEntry
-    mov ecx, [g_num_grid_entries]
-    mul ecx
-    add rax, r8 ; rax = end ptr
-    xor r9d, r9d ; r9 = best grid area
-
-.find_best_area_loop:
-    cmp r8, rax
-    jz .end
-    cmp dword [r8 + GridEntry.marked_infinite], 1
-    jz @f 
-
-    cmp r9d, dword [r8 + GridEntry.area_size]
-    cmovb r9d, dword [r8 + GridEntry.area_size]
-@@: add r8, sizeof.GridEntry
-    jmp .find_best_area_loop
-
 .end:
     mov rcx, _printf_message_fmt
-    mov edx, r9d
+    mov edx, [g_num_10k_points]
     call [printf] 
 
     mov rcx, [g_file_handle]
