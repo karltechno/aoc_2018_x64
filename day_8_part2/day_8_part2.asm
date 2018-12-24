@@ -42,8 +42,6 @@ align 8
 g_stack rb sizeof.StackEntry * c_stack_size
 g_stack_pos dd 0
 
-g_root_value dd 0
-
 section '.text' code readable executable
 
 start:
