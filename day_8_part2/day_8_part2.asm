@@ -147,8 +147,6 @@ start:
     lea r13, [r9 * 4]
     add r13, qword [r15 + StackEntry.child_value_array_ptr]
 
-    cmp qword [r15 + StackEntry.child_value_array_ptr], 0
-
     mov ecx, [g_input_cursor]
     lea rcx, [ecx * 4 + g_input_numbers]
 
