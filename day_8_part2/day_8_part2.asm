@@ -130,8 +130,7 @@ start:
     mov dword [r12 + StackEntry.my_child_index_in_parent], r9d
     
     mov ecx, dword [g_child_val_buff_cur_alloc]
-    shl rcx, 2 ; *4 dword
-    add rcx, g_child_val_buff
+    lea rcx, [g_child_val_buff + rcx * 4]
     mov qword [r12 + StackEntry.child_value_array_ptr], rcx
     add dword [g_child_val_buff_cur_alloc], r13d
 
@@ -151,8 +150,7 @@ start:
     cmp qword [r15 + StackEntry.child_value_array_ptr], 0
 
     mov ecx, [g_input_cursor]
-    shl ecx, 2 ; * 4
-    add rcx, g_input_numbers ; rcx = input pointer
+    lea rcx, [ecx * 4 + g_input_numbers]
 
     add [g_input_cursor], r14d
 
@@ -178,8 +176,7 @@ start:
     mov r10d, dword [r15 + StackEntry.total_children] ; r10d = total children
 
     mov ecx, [g_input_cursor]
-    shl ecx, 2 ; * 4 for dword
-    add rcx, g_input_numbers ; rcx = input pointer
+    lea rcx, [rcx * 4 + g_input_numbers]
 
     add [g_input_cursor], r14d
     xor edx, edx ; edx = accumulator
@@ -194,8 +191,7 @@ start:
 
         ; sub 1 so we are 0-indexed
         sub r15, 1
-        shl r15, 2
-        add r15, r13
+        lea r15, [r15 * 4 + r13]
         add edx, dword [r15]
         
 @@:     add rcx, 4
