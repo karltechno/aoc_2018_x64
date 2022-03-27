@@ -1,1 +1,0 @@
-fasm.exe day_7_part2.asm
